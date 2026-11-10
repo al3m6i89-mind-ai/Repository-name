@@ -122,6 +122,16 @@ void main() {
           return http.Response('{}', 200);
         }
         if (url.contains('accounts:delete')) return http.Response('{}', 200);
+        if (url.endsWith('documents:listCollectionIds')) return http.Response(jsonEncode({'collectionIds': ['users']}), 200);
+        if (url.endsWith('users/u1:listCollectionIds')) return http.Response('{}', 200);
+        if (url.endsWith('documents/users/u1')) {
+          return http.Response(jsonEncode({
+            'name': 'projects/test-proj/databases/(default)/documents/users/u1',
+            'fields': {'fcmToken': {'stringValue': 'T' * 150}, 'name': {'stringValue': 'Ali'}},
+          }), 200);
+        }
+        if (url.contains(':runQuery')) return http.Response('[]', 200);
+        if (url.contains('fcm.googleapis.com')) return http.Response('{"name":"m1"}', 200);
         return http.Response('{"error":{"message":"not found"}}', 404);
       });
       return ServiceAccountBackend(ServiceAccountBackend.parseKey(keyText), LocalStore('t'), client: client);
@@ -169,6 +179,17 @@ void main() {
       await a.delete('auth', u);
       expect(calls.last.url.toString(), contains('accounts:delete'));
       expect((await b.listLogs()).first.action, 'حذف الحساب');
+    });
+
+    test('message goes out as a push to the saved FCM token', () async {
+      final b = make();
+      final u = (await b.listUsers('auth')).single;
+      final result = await UserActions(b).message('auth', u, 'مرحبا');
+      expect(result, contains('✓'));
+      final push = calls.firstWhere((c) => c.url.host == 'fcm.googleapis.com');
+      final msg = (jsonDecode(push.body) as Map)['message'] as Map;
+      expect(msg['token'], 'T' * 150);
+      expect((msg['notification'] as Map)['body'], 'مرحبا');
     });
 
     test('an account disabled in the console shows as banned', () async {

@@ -61,12 +61,19 @@ class _UserDetailScreenState extends State<UserDetailScreen> {
     } catch (_) {}
   }
 
+  /// Like [_run] but shows whether the phone notification was delivered.
+  Future<void> _runMsg(Future<String> Function() f) async {
+    var result = '';
+    await _run(() async => result = await f(), '');
+    if (mounted && result.isNotEmpty) toast(context, result, error: !result.contains('✓'));
+  }
+
   Future<void> _run(Future<void> Function() f, String done, {bool pop = false}) async {
     setState(() => _busy = true);
     try {
       await f();
       if (!mounted) return;
-      toast(context, done);
+      if (done.isNotEmpty) toast(context, done);
       if (pop) return Navigator.of(context).pop();
       final fresh = await _backend.getUser(_appId, _u.id);
       final logs = (await _backend.listLogs(limit: 300)).where((l) => l.userId == _u.id && l.appId == _appId).toList();
@@ -174,13 +181,13 @@ class _UserDetailScreenState extends State<UserDetailScreen> {
     final id = _appId;
     final tiles = <_Act>[
       _Act(Icons.edit_outlined, 'تعديل البيانات', 'الاسم والإيميل والجوال', Brand.primary, _edit),
-      _Act(Icons.mail_outline_rounded, 'إرسال رسالة', 'تظهر له داخل التطبيق', Brand.info, () async {
+      _Act(Icons.mail_outline_rounded, 'إرسال رسالة', 'إشعار على جواله', Brand.info, () async {
         final m = await askText(context, 'رسالة إلى ${u.displayName}', label: 'نص الرسالة', required: true, maxLines: 4);
-        if (m != null) _run(() => a.message(id, u, m), 'تم إرسال الرسالة');
+        if (m != null) _runMsg(() => a.message(id, u, m));
       }),
       _Act(Icons.warning_amber_rounded, 'تحذير', u.warnings > 0 ? 'عنده ${u.warnings} تحذير' : 'إنذار مع سبب', Brand.warning, () async {
         final m = await askText(context, 'تحذير ${u.displayName}', label: 'سبب التحذير', required: true, maxLines: 3);
-        if (m != null) _run(() => a.warn(id, u, m), 'تم إرسال التحذير');
+        if (m != null) _runMsg(() => a.warn(id, u, m));
       }),
       if (u.warnings > 0)
         _Act(Icons.cleaning_services_outlined, 'مسح التحذيرات', 'تصفير العداد', Brand.success, () => _run(() => a.clearWarnings(id, u), 'تم مسح التحذيرات')),

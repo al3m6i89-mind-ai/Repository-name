@@ -65,7 +65,8 @@ class ServiceAccountBackend implements AdminBackend {
         {
           'iss': key['client_email'],
           'scope': 'https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/identitytoolkit '
-              'https://www.googleapis.com/auth/datastore https://www.googleapis.com/auth/firebase',
+              'https://www.googleapis.com/auth/datastore https://www.googleapis.com/auth/firebase '
+              'https://www.googleapis.com/auth/firebase.messaging',
           'aud': 'https://oauth2.googleapis.com/token',
           'iat': now,
           'exp': now + 3600,
@@ -426,6 +427,58 @@ class ServiceAccountBackend implements AdminBackend {
   }
 
   static String _path(Map<String, dynamic> d) => '${d['name']}'.split('/documents/').last;
+
+  /// Finds FCM tokens the app saved for this user (any field whose name
+  /// mentions "token", in their records or a tokens sub-collection) and
+  /// sends each device a notification.
+  @override
+  Future<PushResult> sendPush(String appId, AppUser user, String title, String body) async {
+    final tokens = <String>{};
+    void collect(Object? key, Object? v) {
+      final k = '$key'.toLowerCase();
+      if (v is String && v.length > 100 && !v.contains(' ') && (k.contains('token') || k.contains('fcm') || k.isEmpty)) {
+        tokens.add(v);
+      } else if (v is List && (k.contains('token') || k.contains('fcm'))) {
+        for (final x in v) {
+          collect('', x);
+        }
+      } else if (v is Map && (k.contains('token') || k.contains('fcm') || k.contains('device'))) {
+        v.forEach((kk, vv) => collect(k.contains('token') || k.contains('fcm') ? '' : kk, vv));
+      }
+    }
+
+    try {
+      for (final d in await _findUserData(user)) {
+        final tokenDoc = d.path.toLowerCase().contains('token');
+        d.fields.forEach((k, v) => collect(tokenDoc ? '' : k, v));
+        // A tokens collection often uses the token itself as the document id.
+        final id = d.path.split('/').last;
+        if (tokenDoc && id.length > 100) tokens.add(id);
+      }
+    } catch (_) {}
+    if (tokens.isEmpty) {
+      return const PushResult(0, 0, 'ما لقيت رمز إشعارات (FCM token) لهذا المستخدم في قاعدة البيانات');
+    }
+    var sent = 0;
+    String? lastError;
+    for (final t in tokens) {
+      try {
+        await _call('POST', 'https://fcm.googleapis.com/v1/projects/$projectId/messages:send', body: {
+          'message': {
+            'token': t,
+            'notification': {'title': title, 'body': body},
+            'android': {'priority': 'high', 'notification': {'sound': 'default'}},
+            'apns': {'payload': {'aps': {'sound': 'default'}}},
+            'data': {'type': 'admin_message', 'body': body},
+          },
+        });
+        sent++;
+      } catch (e) {
+        lastError = '$e';
+      }
+    }
+    return PushResult(sent, tokens.length, sent == 0 ? (lastError ?? '') : '');
+  }
 
   @override
   Future<void> deleteData(String path) async {

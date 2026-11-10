@@ -261,6 +261,10 @@ class FirebaseBackend implements AdminBackend {
   }
 
   @override
+  Future<PushResult> sendPush(String appId, AppUser user, String title, String body) async =>
+      const PushResult(0, 0, 'تطبيقك يعرض الرسالة عبر ملف الربط');
+
+  @override
   Future<void> addLog(LogEntry e) async {
     await _send('POST', '$_docs/logs', body: {
       'fields': encodeFields({

@@ -48,15 +48,31 @@ class UserActions {
   Future<void> unsuspend(String appId, AppUser u) =>
       apply(appId, u, 'رفع الحجب', {'suspendedUntil': null, 'banReason': ''});
 
-  Future<void> warn(String appId, AppUser u, String text) =>
-      apply(appId, u, 'تحذير', {'warnings': u.warnings + 1, 'lastWarning': text, 'adminMessage': '⚠️ $text', 'adminMessageAt': DateTime.now()},
-          detail: text);
+  Future<String> warn(String appId, AppUser u, String text) async {
+    await apply(appId, u, 'تحذير',
+        {'warnings': u.warnings + 1, 'lastWarning': text, 'adminMessage': '⚠️ $text', 'adminMessageAt': DateTime.now()},
+        detail: text);
+    return _push(appId, u, '⚠️ تحذير من الإدارة', text);
+  }
 
   Future<void> clearWarnings(String appId, AppUser u) =>
       apply(appId, u, 'مسح التحذيرات', {'warnings': 0, 'lastWarning': ''});
 
-  Future<void> message(String appId, AppUser u, String text) =>
-      apply(appId, u, 'رسالة للمستخدم', {'adminMessage': text, 'adminMessageAt': DateTime.now()}, detail: text);
+  Future<String> message(String appId, AppUser u, String text, {String title = 'رسالة من الإدارة'}) async {
+    await apply(appId, u, 'رسالة للمستخدم', {'adminMessage': text, 'adminMessageAt': DateTime.now()}, detail: text);
+    return _push(appId, u, title, text);
+  }
+
+  /// Returns a line saying whether the phone notification went out.
+  Future<String> _push(String appId, AppUser u, String title, String body) async {
+    try {
+      final r = await backend.sendPush(appId, u, title, body);
+      if (r.sent > 0) return 'وصلت كإشعار على جواله ✓${r.sent > 1 ? ' (${r.sent} أجهزة)' : ''}';
+      return 'انحفظت في حسابه. ${r.note.isEmpty ? 'تعذّر إرسال الإشعار' : r.note}';
+    } catch (e) {
+      return 'انحفظت في حسابه، وتعذّر إرسال الإشعار: $e';
+    }
+  }
 
   Future<void> forceLogout(String appId, AppUser u) =>
       apply(appId, u, 'تسجيل خروج إجباري', {'forceLogoutAt': DateTime.now()});

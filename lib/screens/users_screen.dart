@@ -83,7 +83,7 @@ class _UsersScreenState extends State<UsersScreen> {
         }
       case 'message':
         final m = await askText(context, 'رسالة لـ ${targets.length} مستخدم', label: 'نص الرسالة', required: true, maxLines: 4);
-        if (m != null) run = (u) => acts.message(appId, u, m);
+        if (m != null) run = (u) => acts.message(appId, u, m).then((_) {});
       case 'logout':
         if (await confirm(context, 'تسجيل خروج ${targets.length} مستخدم؟', 'يخرجون من كل الأجهزة ويلزمهم دخول من جديد.', danger: false)) {
           run = (u) => acts.forceLogout(appId, u);

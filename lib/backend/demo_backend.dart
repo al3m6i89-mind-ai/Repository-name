@@ -190,6 +190,9 @@ class DemoBackend implements AdminBackend {
   }
 
   @override
+  Future<PushResult> sendPush(String appId, AppUser user, String title, String body) async => const PushResult(1, 1);
+
+  @override
   Future<void> deleteData(String path) async {
     for (final e in _insights.entries.toList()) {
       final i = e.value;

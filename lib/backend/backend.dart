@@ -37,6 +37,10 @@ abstract class AdminBackend {
   /// Deletes one stored record of a user (a post, story, comment…).
   Future<void> deleteData(String path);
 
+  /// Sends a phone notification to the user's devices, when the app saved
+  /// their push token. Returns how many devices got it.
+  Future<PushResult> sendPush(String appId, AppUser user, String title, String body);
+
   Future<void> addLog(LogEntry entry);
 
   /// Newest first.
@@ -48,4 +52,11 @@ class BackendError implements Exception {
   BackendError(this.message);
   @override
   String toString() => message;
+}
+
+class PushResult {
+  final int sent;
+  final int tokens;
+  final String note;
+  const PushResult(this.sent, this.tokens, [this.note = '']);
 }
