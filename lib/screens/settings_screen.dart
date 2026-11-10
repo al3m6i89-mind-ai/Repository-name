@@ -27,7 +27,20 @@ class SettingsScreen extends StatelessWidget {
                   leading: Text(l.connection.icon, style: const TextStyle(fontSize: 24)),
                   title: Text(l.connection.label, style: const TextStyle(fontWeight: FontWeight.w700)),
                   subtitle: Text(l.ok ? l.connection.typeLabel : 'غير متصل: ${l.error}', maxLines: 2, overflow: TextOverflow.ellipsis),
-                  trailing: Icon(l.ok ? Icons.check_circle_rounded : Icons.error_rounded, color: l.ok ? Brand.success : Brand.danger),
+                  trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(l.ok ? Icons.check_circle_rounded : Icons.error_rounded, color: l.ok ? Brand.success : Brand.danger),
+                    IconButton(
+                      tooltip: 'فصل الحساب',
+                      icon: const Icon(Icons.delete_outline_rounded),
+                      onPressed: () async {
+                        final ok = await confirm(context, 'فصل ${l.connection.label}؟',
+                            'يُحذف الحساب من هذا الجهاز فقط. ما يتأثر شي في Firebase.', action: 'فصل');
+                        if (!ok) return;
+                        await s.remove(l);
+                        if (context.mounted) toast(context, 'تم فصل ${l.connection.label}');
+                      },
+                    ),
+                  ]),
                 ),
               ListTile(
                 leading: const Icon(Icons.add_link_rounded),

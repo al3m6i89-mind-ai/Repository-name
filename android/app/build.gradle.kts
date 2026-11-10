@@ -29,11 +29,21 @@ android {
         versionName = flutter.versionName
     }
 
+    // CI keeps one key in its private cache, so every new APK installs as an
+    // update over the previous one. Local builds fall back to the debug key.
+    val ciKey = file("ci-signing.jks")
+    signingConfigs {
+        create("ci") {
+            storeFile = ciKey
+            storePassword = "adminhub-ci"
+            keyAlias = "adminhub"
+            keyPassword = "adminhub-ci"
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (ciKey.exists()) signingConfigs.getByName("ci") else signingConfigs.getByName("debug")
         }
     }
 }
