@@ -92,7 +92,7 @@ class _UserDetailScreenState extends State<UserDetailScreen> {
           headerSliverBuilder: (context, _) => [
             SliverAppBar(
               pinned: true,
-              expandedHeight: 250,
+              expandedHeight: 200 + 60 * MediaQuery.textScalerOf(context).scale(1).clamp(1.0, 2.0),
               foregroundColor: Colors.white,
               backgroundColor: const Color(0xFF4C2FC8),
               actions: [
@@ -100,8 +100,8 @@ class _UserDetailScreenState extends State<UserDetailScreen> {
               ],
               flexibleSpace: FlexibleSpaceBar(background: _header()),
               bottom: const TabBar(
-                isScrollable: true,
-                tabAlignment: TabAlignment.start,
+                dividerColor: Colors.transparent,
+                labelPadding: EdgeInsets.symmetric(horizontal: 4),
                 labelColor: Colors.white,
                 unselectedLabelColor: Colors.white70,
                 indicatorColor: Colors.white,
@@ -239,13 +239,15 @@ class _UserDetailScreenState extends State<UserDetailScreen> {
           ),
         ),
       if (u.adminMessage.isNotEmpty) const SizedBox(height: 12),
-      GridView.count(
-        crossAxisCount: wide ? 4 : 2,
+      GridView(
         shrinkWrap: true,
         physics: const NeverScrollableScrollPhysics(),
-        mainAxisSpacing: 10,
-        crossAxisSpacing: 10,
-        childAspectRatio: 1.55,
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: wide ? 4 : 2,
+          mainAxisSpacing: 10,
+          crossAxisSpacing: 10,
+          mainAxisExtent: 128 * MediaQuery.textScalerOf(context).scale(1).clamp(1.0, 1.6),
+        ),
         children: [for (final t in tiles) _actTile(t)],
       ),
       const SectionTitle('ملاحظاتك الخاصة'),

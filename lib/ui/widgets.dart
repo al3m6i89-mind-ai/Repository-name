@@ -73,7 +73,12 @@ class Pill extends StatelessWidget {
         decoration: BoxDecoration(color: color.withValues(alpha: .13), borderRadius: BorderRadius.circular(20)),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           if (icon != null) ...[Icon(icon, size: 13, color: color), const SizedBox(width: 4)],
-          Text(text, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w700, height: 1.2)),
+          Flexible(
+            child: Text(text,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w700, height: 1.2)),
+          ),
         ]),
       );
 }

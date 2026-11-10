@@ -156,13 +156,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     return [
       const SectionTitle('نظرة عامة'),
-      GridView.count(
-        crossAxisCount: cols,
+      GridView(
         shrinkWrap: true,
         physics: const NeverScrollableScrollPhysics(),
-        mainAxisSpacing: 10,
-        crossAxisSpacing: 10,
-        childAspectRatio: .95,
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: cols,
+          mainAxisSpacing: 10,
+          crossAxisSpacing: 10,
+          mainAxisExtent: 124 * MediaQuery.textScalerOf(context).scale(1).clamp(1.0, 1.6),
+        ),
         children: [
           StatCard(label: 'نشط اليوم', value: '$today', icon: Icons.bolt_rounded, color: Brand.success),
           StatCard(label: 'جدد هذا الأسبوع', value: '$week', icon: Icons.person_add_alt_1_rounded, color: Brand.info),
