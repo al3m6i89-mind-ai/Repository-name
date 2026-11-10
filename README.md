@@ -1,54 +1,39 @@
 # لوحة تطبيقاتي 🛡️
 
-تطبيق أندرويد تدخل فيه بإيميلك وكلمة المرور، وتشوف تطبيقاتك ومستخدمي كل تطبيق، وتقدر:
+لوحة تحكم احترافية (أندرويد + متصفح) لإدارة مستخدمي كل تطبيقاتك من مكان واحد، حتى لو كانت في أكثر من حساب Firebase.
 
-- **تحذف** حساب مستخدم نهائياً
-- **تحظر** المستخدم (مع سبب) أو تفك الحظر
-- **تحجب** المستخدم فترة مؤقتة (ساعة، يوم، 3 أيام، أسبوع، شهر، أو عدد أيام تختاره) أو ترفع الحجب
-- **تضيف** تطبيقاتك من زر «إضافة تطبيق»، وتبحث وتفلتر المستخدمين حسب الحالة
+- **تحميل الـ APK:** [admin-hub.apk](https://github.com/al3m6i89-mind-ai/Repository-name/releases/latest/download/admin-hub.apk)
+- **نسخة المتصفح:** [al3m6i89-mind-ai.github.io/Repository-name](https://al3m6i89-mind-ai.github.io/Repository-name/)
 
-## تحميل الـ APK
-افتح هذا الرابط من جوالك: **[admin-hub.apk](https://github.com/al3m6i89-mind-ai/Repository-name/releases/latest/download/admin-hub.apk)**
+كل دفعة على `main` تبني نسخة APK جديدة وتحدّث نسخة المتصفح تلقائياً.
 
-كل دفعة على `main` تبني نسخة جديدة وتنشرها في Releases.
+## المزايا
+- **أكثر من حساب Firebase:** اربط كل مشروع بملف «حساب الخدمة» أو بإيميل المشرف وكلمة المرور.
+- **لوحة رئيسية:** إجمالي المستخدمين، المتصلين الآن، النشطين اليوم، الجدد، المحظورين، المحجوبين، المقيّدين، وتوزيع الحالات لكل تطبيق.
+- **صفحة كاملة لكل حساب:** معلوماته، طرق الدخول، الجهاز، أوقات الدخول، كل بياناته في قاعدة البيانات، منشوراته وقصصه ولحظاته وتعليقاته بالصور، وخط زمني لنشاطه.
+- **الصلاحيات:** تعديل البيانات، رسالة داخل التطبيق، تحذير، مسح التحذيرات، تقييد ميزات محددة، تغيير الدور، تغيير الخطة، إضافة وخصم نقاط، توثيق، تسجيل خروج إجباري من كل الأجهزة، حجب مؤقت، حظر دائم، حذف الحساب، حذف منشور أو قصة، ملاحظات خاصة.
+- **إجراءات جماعية:** حدد أكثر من مستخدم (ضغط مطوّل) ونفّذ عليهم مرة وحدة.
+- **سجل الإجراءات:** كل إجراء مع وقته ومن سوّاه.
+- **قفل اللوحة بكلمة مرور**، ووضع فاتح وداكن.
 
-## نسخة المتصفح
-**[al3m6i89-mind-ai.github.io/Repository-name](https://al3m6i89-mind-ai.github.io/Repository-name/)** تتحدّث تلقائياً مع كل دفعة على `main`.
+## الربط بملف حساب الخدمة (تحكم كامل بدون تعديل تطبيقاتك)
+1. افتح [console.firebase.google.com](https://console.firebase.google.com) واختر المشروع.
+2. ⚙️ **Project settings** ← تبويب **Service accounts**.
+3. **Generate new private key** ← **Generate key**. ينزل ملف `.json`.
+4. في اللوحة: **التطبيقات ← ربط حساب ← ملف حساب الخدمة ← اختر ملف المفتاح ← ربط الحساب**.
+5. كرر لكل مشروع أو حساب Google ثاني.
 
-## الوضع التجريبي
-بدون أي إعداد: اختر «تجريبي» وادخل بـ `admin@demo.com` وكلمة المرور `123456`. البيانات وهمية وترجع لأصلها عند إعادة فتح التطبيق.
+> الملف يعطي صلاحية كاملة على المشروع. لا ترسله لأحد ولا ترفعه على GitHub.
 
-## التشغيل الحقيقي مع Firebase (مجاني)
-1. افتح [console.firebase.google.com](https://console.firebase.google.com) وأنشئ مشروع.
-2. **Authentication** ← Sign-in method: فعّل **Email/Password** و **Anonymous**.
-3. **Authentication** ← Users ← Add user: أضف إيميلك وكلمة مرور (هذا حساب المشرف). انسخ الـ **User UID**.
-4. **Firestore Database** ← Create database. ثم أنشئ مجموعة `admins` وفيها مستند معرّفه هو الـ UID اللي نسخته (أي حقل، مثل `email`).
-5. **Firestore** ← Rules: الصق محتوى [`firebase/firestore.rules`](firebase/firestore.rules) واضغط Publish.
-6. ⚙️ Project settings: انسخ **Project ID** و **Web API Key** (إذا ما ظهر المفتاح، أضف تطبيق ويب للمشروع).
-7. في اللوحة اختر «Firebase»، الصق المعرّف والمفتاح، وادخل بإيميلك وكلمة المرور.
+مع هذا الربط: الحظر والحجب يعطّلان الحساب في Firebase Authentication، والخروج الإجباري يلغي كل جلسات المستخدم، والحذف يحذف الحساب. هذي كلها تشتغل فوراً بدون تعديل تطبيقك. أما الرسائل والتحذيرات والقيود والدور والخطة والنقاط فتنحفظ في custom claims، وتطبيقك يقرأها من `getIdTokenResult().claims`.
 
-## ربط تطبيقاتك باللوحة
-لكل تطبيق Flutter:
-1. انسخ [`client/admin_hub_client.dart`](client/admin_hub_client.dart) إلى مشروعك (يحتاج `http` و `shared_preferences`).
-2. عند فتح التطبيق أو بعد تسجيل الدخول:
-   ```dart
-   final hub = AdminHubClient(apiKey: 'AIza…', projectId: 'my-apps-12345', appId: 'my-app');
-   final s = await hub.check(name: name, email: email);
-   if (!s.allowed) {
-     // اعرض s.message وامنع استخدام التطبيق
-   }
-   ```
-3. في اللوحة اضغط «إضافة تطبيق» واكتب نفس المعرّف (`my-app`).
+## الربط بالإيميل وكلمة المرور (للتطبيقات الجديدة)
+1. فعّل في Authentication: **Email/Password** و **Anonymous**، وأضف نفسك كمستخدم وانسخ الـ UID.
+2. أنشئ Firestore، ومجموعة `admins` فيها مستند معرّفه الـ UID.
+3. الصق [`firebase/firestore.rules`](firebase/firestore.rules) في Firestore ← Rules.
+4. انسخ **Project ID** و **Web API Key** من Project settings، واربطها في اللوحة مع إيميلك وكلمة المرور.
+5. في تطبيقك انسخ [`client/admin_hub_client.dart`](client/admin_hub_client.dart) واستدعِ `check()` عند الفتح و `logEvent()` للنشاط.
 
-المستخدم يظهر في اللوحة أول ما يفتح التطبيق. ما يقدر يفك حظره بنفسه لأن قواعد Firestore تمنعه من تعديل حقول الحظر.
-
-## شكل البيانات
-```
-admins/{uid}
-apps/{appId}                 name, icon, description
-apps/{appId}/users/{userId}  name, email, createdAt, lastSeen, banned, suspendedUntil, banReason, …
-```
-أي حقل إضافي تحفظه في مستند المستخدم (مثل الخطة أو النقاط) يظهر تلقائياً في تفاصيله.
-
-## إضافة خادم غير Firebase
-الواجهة تتكلم مع `AdminBackend` في `lib/backend/backend.dart` فقط. لربط Supabase أو خادمك الخاص اكتب كلاس جديد ينفّذها.
+## الكود
+- `lib/backend/` الاتصال: `service_account_backend.dart` (Firebase Admin عبر REST)، `firebase_backend.dart` (Firestore)، `demo_backend.dart`، `session.dart` (الحسابات المتعددة).
+- `lib/screens/` الشاشات، `lib/ui/` التصميم.

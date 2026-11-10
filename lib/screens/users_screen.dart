@@ -1,26 +1,18 @@
 import 'package:flutter/material.dart';
 
-import '../backend/backend.dart';
+import '../backend/actions.dart';
 import '../backend/models.dart';
-import 'apps_screen.dart' show ErrorView, EmptyView, confirm;
+import '../main.dart';
+import '../ui/action_dialogs.dart';
+import '../ui/theme.dart';
+import '../ui/widgets.dart';
+import 'user_detail_screen.dart';
 
-String fmtDate(DateTime? d) {
-  if (d == null) return '—';
-  String two(int n) => n.toString().padLeft(2, '0');
-  return '${d.year}/${two(d.month)}/${two(d.day)} ${two(d.hour)}:${two(d.minute)}';
-}
-
-String fmtLeft(DateTime until) {
-  final left = until.difference(DateTime.now());
-  if (left.inDays >= 1) return '${left.inDays} يوم';
-  if (left.inHours >= 1) return '${left.inHours} ساعة';
-  return '${left.inMinutes.clamp(1, 59)} دقيقة';
-}
+enum _Sort { lastSeen, newest, name }
 
 class UsersScreen extends StatefulWidget {
-  final AdminBackend backend;
   final AppInfo app;
-  const UsersScreen({super.key, required this.backend, required this.app});
+  const UsersScreen({super.key, required this.app});
 
   @override
   State<UsersScreen> createState() => _UsersScreenState();
@@ -31,312 +23,256 @@ class _UsersScreenState extends State<UsersScreen> {
   Object? _error;
   String _query = '';
   UserStatus? _filter;
+  _Sort _sort = _Sort.lastSeen;
+  final Set<String> _selected = {};
+  bool _busy = false;
 
   @override
-  void initState() {
-    super.initState();
-    _load();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_users == null && _error == null) _load();
   }
 
   Future<void> _load() async {
     setState(() => _error = null);
     try {
-      final users = await widget.backend.listUsers(widget.app.id);
-      users.sort((a, b) => (b.lastSeen ?? DateTime(0)).compareTo(a.lastSeen ?? DateTime(0)));
+      final users = await Hub.of(context).session.backendOf(widget.app).listUsers(widget.app.id);
       if (mounted) setState(() => _users = users);
     } catch (e) {
       if (mounted) setState(() => _error = e);
     }
   }
 
+  List<AppUser> _shown() {
+    final q = _query.trim().toLowerCase();
+    final list = (_users ?? const <AppUser>[])
+        .where((u) => _filter == null || u.status == _filter)
+        .where((u) =>
+            q.isEmpty ||
+            u.name.toLowerCase().contains(q) ||
+            u.email.toLowerCase().contains(q) ||
+            u.phone.contains(q) ||
+            u.id.toLowerCase().contains(q))
+        .toList();
+    switch (_sort) {
+      case _Sort.lastSeen:
+        list.sort((a, b) => (b.lastSeen ?? DateTime(0)).compareTo(a.lastSeen ?? DateTime(0)));
+      case _Sort.newest:
+        list.sort((a, b) => (b.createdAt ?? DateTime(0)).compareTo(a.createdAt ?? DateTime(0)));
+      case _Sort.name:
+        list.sort((a, b) => a.displayName.compareTo(b.displayName));
+    }
+    return list;
+  }
+
+  Future<void> _bulk(String what) async {
+    final targets = _users!.where((u) => _selected.contains(u.id)).toList();
+    if (targets.isEmpty) return;
+    final acts = UserActions(Hub.of(context).session.backendOf(widget.app));
+    final appId = widget.app.id;
+    Future<void> Function(AppUser)? run;
+    switch (what) {
+      case 'ban':
+        final r = await askText(context, 'حظر ${targets.length} مستخدم', label: 'السبب (اختياري)');
+        if (r != null) run = (u) => acts.ban(appId, u, r);
+      case 'suspend':
+        final d = await pickDuration(context);
+        if (d != null && mounted) {
+          final r = await askText(context, 'حجب ${durationLabel(d)}', label: 'السبب (اختياري)');
+          if (r != null) run = (u) => acts.suspend(appId, u, DateTime.now().add(d), r);
+        }
+      case 'message':
+        final m = await askText(context, 'رسالة لـ ${targets.length} مستخدم', label: 'نص الرسالة', required: true, maxLines: 4);
+        if (m != null) run = (u) => acts.message(appId, u, m);
+      case 'logout':
+        if (await confirm(context, 'تسجيل خروج ${targets.length} مستخدم؟', 'يخرجون من كل الأجهزة ويلزمهم دخول من جديد.', danger: false)) {
+          run = (u) => acts.forceLogout(appId, u);
+        }
+      case 'unban':
+        run = (u) async {
+          if (u.banned) await acts.unban(appId, u);
+          if (u.status == UserStatus.suspended) await acts.unsuspend(appId, u);
+        };
+      case 'delete':
+        if (await confirm(context, 'حذف ${targets.length} حساب نهائياً؟', 'ما تقدر ترجعهم بعد الحذف.', action: 'حذف نهائي')) {
+          run = (u) => acts.delete(appId, u);
+        }
+    }
+    if (run == null || !mounted) return;
+    setState(() => _busy = true);
+    var failed = 0;
+    for (final u in targets) {
+      try {
+        await run(u);
+      } catch (_) {
+        failed++;
+      }
+    }
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _selected.clear();
+    });
+    toast(context, failed == 0 ? 'تم تنفيذ الإجراء على ${targets.length}' : 'نجح ${targets.length - failed} وفشل $failed',
+        error: failed > 0);
+    _load();
+  }
+
   @override
   Widget build(BuildContext context) {
-    final users = _users;
+    final selecting = _selected.isNotEmpty;
     return Scaffold(
-      appBar: AppBar(
-        title: Text('${widget.app.icon} ${widget.app.name}'),
-        actions: [IconButton(onPressed: _load, icon: const Icon(Icons.refresh), tooltip: 'تحديث')],
-      ),
-      body: _error != null
-          ? ErrorView(message: '$_error', onRetry: _load)
-          : users == null
-              ? const Center(child: CircularProgressIndicator())
-              : _body(users),
+      appBar: selecting
+          ? AppBar(
+              leading: IconButton(icon: const Icon(Icons.close), onPressed: () => setState(_selected.clear)),
+              title: Text('${_selected.length} محدد'),
+              actions: [
+                IconButton(
+                  tooltip: 'تحديد الكل',
+                  icon: const Icon(Icons.select_all_rounded),
+                  onPressed: () => setState(() => _selected.addAll(_shown().map((u) => u.id))),
+                ),
+                PopupMenuButton<String>(
+                  icon: const Icon(Icons.more_vert),
+                  onSelected: _bulk,
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(value: 'message', child: Text('إرسال رسالة')),
+                    PopupMenuItem(value: 'suspend', child: Text('حجب مؤقت')),
+                    PopupMenuItem(value: 'ban', child: Text('حظر')),
+                    PopupMenuItem(value: 'unban', child: Text('فك الحظر والحجب')),
+                    PopupMenuItem(value: 'logout', child: Text('تسجيل خروج إجباري')),
+                    PopupMenuItem(value: 'delete', child: Text('حذف الحسابات', style: TextStyle(color: Brand.danger))),
+                  ],
+                ),
+              ],
+            )
+          : AppBar(
+              title: Row(children: [
+                AppBadge(app: widget.app, size: 34),
+                const SizedBox(width: 10),
+                Flexible(child: Text(widget.app.name, overflow: TextOverflow.ellipsis)),
+              ]),
+              actions: [
+                PopupMenuButton<_Sort>(
+                  icon: const Icon(Icons.sort_rounded),
+                  tooltip: 'ترتيب',
+                  onSelected: (s) => setState(() => _sort = s),
+                  itemBuilder: (_) => [
+                    CheckedPopupMenuItem(value: _Sort.lastSeen, checked: _sort == _Sort.lastSeen, child: const Text('آخر ظهور')),
+                    CheckedPopupMenuItem(value: _Sort.newest, checked: _sort == _Sort.newest, child: const Text('الأحدث تسجيلاً')),
+                    CheckedPopupMenuItem(value: _Sort.name, checked: _sort == _Sort.name, child: const Text('الاسم')),
+                  ],
+                ),
+                IconButton(onPressed: _load, icon: const Icon(Icons.refresh_rounded), tooltip: 'تحديث'),
+              ],
+            ),
+      body: Column(children: [
+        if (_busy) const LinearProgressIndicator(),
+        Expanded(
+          child: _error != null
+              ? ErrorView(message: '$_error', onRetry: _load)
+              : _users == null
+                  ? const Center(child: CircularProgressIndicator())
+                  : _list(),
+        ),
+      ]),
     );
   }
 
-  Widget _body(List<AppUser> users) {
+  Widget _list() {
+    final users = _users!;
+    final shown = _shown();
     int count(UserStatus s) => users.where((u) => u.status == s).length;
-    final q = _query.trim().toLowerCase();
-    final shown = users
-        .where((u) => _filter == null || u.status == _filter)
-        .where((u) => q.isEmpty || u.name.toLowerCase().contains(q) || u.email.toLowerCase().contains(q) || u.id.contains(q))
-        .toList();
-
     return RefreshIndicator(
       onRefresh: _load,
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
-        children: [
-          TextField(
-            decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'ابحث بالاسم أو الإيميل'),
-            onChanged: (v) => setState(() => _query = v),
-          ),
-          const SizedBox(height: 10),
-          Wrap(spacing: 8, runSpacing: 4, children: [
+      child: ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 24), children: [
+        TextField(
+          decoration: const InputDecoration(prefixIcon: Icon(Icons.search_rounded), hintText: 'ابحث بالاسم أو الإيميل أو الجوال أو المعرّف'),
+          onChanged: (v) => setState(() => _query = v),
+        ),
+        const SizedBox(height: 12),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(children: [
             ChoiceChip(label: Text('الكل ${users.length}'), selected: _filter == null, onSelected: (_) => setState(() => _filter = null)),
-            for (final s in UserStatus.values)
+            for (final s in UserStatus.values) ...[
+              const SizedBox(width: 8),
               ChoiceChip(
-                label: Text('${statusLabel(s)} ${count(s)}'),
+                label: Text('${statusName(s)} ${count(s)}'),
                 selected: _filter == s,
                 onSelected: (_) => setState(() => _filter = _filter == s ? null : s),
               ),
+            ],
           ]),
-          const SizedBox(height: 8),
-          if (shown.isEmpty)
-            const Padding(
-              padding: EdgeInsets.only(top: 60),
-              child: EmptyView(icon: Icons.people_outline, text: 'ما فيه مستخدمين هنا'),
-            ),
-          for (final u in shown)
-            Card(
-              child: ListTile(
-                leading: CircleAvatar(child: Text(u.name.isEmpty ? '?' : u.name.characters.first)),
-                title: Text(u.name.isEmpty ? '(بدون اسم)' : u.name),
-                subtitle: Text(u.email.isEmpty ? u.id : u.email, textDirection: TextDirection.ltr, textAlign: TextAlign.right),
-                trailing: StatusChip(user: u),
-                onTap: () => _open(u),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _open(AppUser u) async {
-    await showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (_) => UserSheet(backend: widget.backend, appId: widget.app.id, user: u),
-    );
-    _load();
-  }
-}
-
-String statusLabel(UserStatus s) => switch (s) {
-      UserStatus.active => 'نشط',
-      UserStatus.suspended => 'محجوب مؤقتاً',
-      UserStatus.banned => 'محظور',
-    };
-
-class StatusChip extends StatelessWidget {
-  final AppUser user;
-  const StatusChip({super.key, required this.user});
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final s = user.status;
-    final (bg, fg) = switch (s) {
-      UserStatus.active => (Colors.green.withValues(alpha: .15), Colors.green.shade700),
-      UserStatus.suspended => (Colors.orange.withValues(alpha: .18), Colors.orange.shade800),
-      UserStatus.banned => (cs.errorContainer, cs.onErrorContainer),
-    };
-    final text = s == UserStatus.suspended ? 'محجوب ${fmtLeft(user.suspendedUntil!)}' : statusLabel(s);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(20)),
-      child: Text(text, style: TextStyle(color: fg, fontSize: 12, fontWeight: FontWeight.w600)),
-    );
-  }
-}
-
-class UserSheet extends StatefulWidget {
-  final AdminBackend backend;
-  final String appId;
-  final AppUser user;
-  const UserSheet({super.key, required this.backend, required this.appId, required this.user});
-
-  @override
-  State<UserSheet> createState() => _UserSheetState();
-}
-
-class _UserSheetState extends State<UserSheet> {
-  late AppUser _u = widget.user;
-  bool _busy = false;
-
-  Future<void> _do(Future<void> Function() f, AppUser Function(AppUser) after, String done, {bool close = false}) async {
-    setState(() => _busy = true);
-    final messenger = ScaffoldMessenger.of(context);
-    try {
-      await f();
-      if (!mounted) return;
-      setState(() => _u = after(_u));
-      messenger.showSnackBar(SnackBar(content: Text(done)));
-      if (close) Navigator.pop(context);
-    } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('$e')));
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  Future<String?> _reason(String title) async {
-    final c = TextEditingController();
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text(title),
-        content: TextField(controller: c, decoration: const InputDecoration(labelText: 'السبب (اختياري)')),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('إلغاء')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('تأكيد')),
-        ],
-      ),
-    );
-    final text = c.text.trim();
-    c.dispose();
-    return ok == true ? text : null;
-  }
-
-  Future<void> _ban() async {
-    final reason = await _reason('حظر ${_u.name}');
-    if (reason == null) return;
-    await _do(() => widget.backend.setBanned(widget.appId, _u.id, true, reason: reason),
-        (u) => u.copyWith(banned: true, banReason: reason), 'تم الحظر');
-  }
-
-  Future<void> _unban() => _do(() => widget.backend.setBanned(widget.appId, _u.id, false),
-      (u) => u.copyWith(banned: false, banReason: ''), 'تم فك الحظر');
-
-  Future<void> _suspend() async {
-    final d = await showDialog<Duration>(context: context, builder: (_) => const _DurationDialog());
-    if (d == null || !mounted) return;
-    final reason = await _reason('حجب لمدة ${_durationLabel(d)}');
-    if (reason == null) return;
-    final until = DateTime.now().add(d);
-    await _do(() => widget.backend.setSuspendedUntil(widget.appId, _u.id, until, reason: reason),
-        (u) => u.copyWith(suspendedUntil: until, banReason: reason), 'تم الحجب حتى ${fmtDate(until)}');
-  }
-
-  Future<void> _unsuspend() => _do(() => widget.backend.setSuspendedUntil(widget.appId, _u.id, null),
-      (u) => u.copyWith(clearSuspension: true, banReason: ''), 'تم رفع الحجب');
-
-  Future<void> _delete() async {
-    final ok = await confirm(context, 'حذف ${_u.name}؟', 'ينحذف حساب المستخدم وبياناته في هذا التطبيق نهائياً، وما يقدر يرجع.',
-        action: 'حذف نهائي');
-    if (ok) await _do(() => widget.backend.deleteUser(widget.appId, _u.id), (u) => u, 'تم حذف المستخدم', close: true);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final s = _u.status;
-    Widget row(String k, String v, {bool ltr = false}) => Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4),
-          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            SizedBox(width: 110, child: Text(k, style: TextStyle(color: cs.onSurfaceVariant))),
-            Expanded(child: SelectableText(v, textDirection: ltr ? TextDirection.ltr : null)),
-          ]),
-        );
-
-    return SafeArea(
-      child: SingleChildScrollView(
-        padding: EdgeInsets.fromLTRB(20, 0, 20, 20 + MediaQuery.of(context).viewInsets.bottom),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Row(children: [
-            CircleAvatar(radius: 26, child: Text(_u.name.isEmpty ? '?' : _u.name.characters.first, style: const TextStyle(fontSize: 22))),
-            const SizedBox(width: 12),
-            Expanded(child: Text(_u.name.isEmpty ? '(بدون اسم)' : _u.name, style: Theme.of(context).textTheme.titleLarge)),
-            StatusChip(user: _u),
-          ]),
-          const SizedBox(height: 16),
-          row('الإيميل', _u.email.isEmpty ? '—' : _u.email, ltr: true),
-          row('المعرّف', _u.id, ltr: true),
-          row('تاريخ التسجيل', fmtDate(_u.createdAt)),
-          row('آخر ظهور', fmtDate(_u.lastSeen)),
-          if (s == UserStatus.suspended) row('محجوب حتى', fmtDate(_u.suspendedUntil)),
-          if (s != UserStatus.active && _u.banReason.isNotEmpty) row('السبب', _u.banReason),
-          for (final e in _u.extra.entries) row(e.key, e.value),
-          const SizedBox(height: 20),
-          if (_busy) const LinearProgressIndicator(),
-          const SizedBox(height: 8),
-          if (s == UserStatus.banned)
-            FilledButton.tonalIcon(onPressed: _busy ? null : _unban, icon: const Icon(Icons.lock_open), label: const Text('فك الحظر'))
-          else
-            FilledButton.tonalIcon(onPressed: _busy ? null : _ban, icon: const Icon(Icons.block), label: const Text('حظر')),
-          const SizedBox(height: 8),
-          if (s == UserStatus.suspended)
-            FilledButton.tonalIcon(onPressed: _busy ? null : _unsuspend, icon: const Icon(Icons.timer_off_outlined), label: const Text('رفع الحجب'))
-          else if (s == UserStatus.active)
-            FilledButton.tonalIcon(onPressed: _busy ? null : _suspend, icon: const Icon(Icons.timer_outlined), label: const Text('حجب لفترة مؤقتة')),
-          const SizedBox(height: 8),
-          OutlinedButton.icon(
-            onPressed: _busy ? null : _delete,
-            style: OutlinedButton.styleFrom(foregroundColor: cs.error, side: BorderSide(color: cs.error)),
-            icon: const Icon(Icons.delete_outline),
-            label: const Text('حذف الحساب'),
-          ),
-        ]),
-      ),
-    );
-  }
-}
-
-String _durationLabel(Duration d) {
-  if (d.inDays >= 1) return '${d.inDays} يوم';
-  return '${d.inHours} ساعة';
-}
-
-class _DurationDialog extends StatefulWidget {
-  const _DurationDialog();
-
-  @override
-  State<_DurationDialog> createState() => _DurationDialogState();
-}
-
-class _DurationDialogState extends State<_DurationDialog> {
-  final _days = TextEditingController();
-  static const presets = [
-    Duration(hours: 1),
-    Duration(hours: 24),
-    Duration(days: 3),
-    Duration(days: 7),
-    Duration(days: 30),
-  ];
-
-  @override
-  void dispose() {
-    _days.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('مدة الحجب'),
-      content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Wrap(spacing: 8, runSpacing: 8, children: [
-          for (final d in presets) ActionChip(label: Text(_durationLabel(d)), onPressed: () => Navigator.pop(context, d)),
-        ]),
-        const SizedBox(height: 16),
-        TextField(
-          controller: _days,
-          keyboardType: TextInputType.number,
-          decoration: const InputDecoration(labelText: 'أو اكتب عدد الأيام'),
         ),
+        const SizedBox(height: 6),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+          child: Text('اضغط مطولاً على أي مستخدم لتحديد أكثر من واحد',
+              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12)),
+        ),
+        if (shown.isEmpty)
+          const Padding(padding: EdgeInsets.only(top: 50), child: EmptyView(icon: Icons.people_outline_rounded, title: 'ما فيه مستخدمين هنا')),
+        for (final u in shown) ...[
+          _tile(u),
+          const SizedBox(height: 8),
+        ],
       ]),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
-        FilledButton(
-          onPressed: () {
-            final n = int.tryParse(_days.text.trim());
-            if (n != null && n > 0) Navigator.pop(context, Duration(days: n));
-          },
-          child: const Text('حجب'),
+    );
+  }
+
+  Widget _tile(AppUser u) {
+    final cs = Theme.of(context).colorScheme;
+    final sel = _selected.contains(u.id);
+    void toggle() => setState(() => sel ? _selected.remove(u.id) : _selected.add(u.id));
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      color: sel ? cs.primaryContainer.withValues(alpha: .5) : null,
+      child: InkWell(
+        onLongPress: toggle,
+        onTap: _selected.isNotEmpty
+            ? toggle
+            : () => Navigator.of(context)
+                .push(MaterialPageRoute(builder: (_) => UserDetailScreen(app: widget.app, user: u)))
+                .then((_) => _load()),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(children: [
+            sel
+                ? Container(
+                    width: 46,
+                    height: 46,
+                    decoration: BoxDecoration(color: cs.primary, borderRadius: BorderRadius.circular(15)),
+                    child: const Icon(Icons.check_rounded, color: Colors.white),
+                  )
+                : UserAvatar(user: u, size: 46),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [
+                  Flexible(
+                    child: Text(u.displayName,
+                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15), overflow: TextOverflow.ellipsis),
+                  ),
+                  if (u.verified) const Padding(padding: EdgeInsetsDirectional.only(start: 4), child: Icon(Icons.verified_rounded, size: 16, color: Brand.info)),
+                  if (u.role != 'user')
+                    Padding(
+                      padding: const EdgeInsetsDirectional.only(start: 6),
+                      child: Pill(userRoles[u.role] ?? u.role, color: Brand.violet),
+                    ),
+                ]),
+                const SizedBox(height: 2),
+                Text(u.email.isNotEmpty ? u.email : (u.phone.isNotEmpty ? u.phone : u.id),
+                    style: TextStyle(color: cs.onSurfaceVariant, fontSize: 13), overflow: TextOverflow.ellipsis),
+                const SizedBox(height: 2),
+                Text('آخر ظهور ${fmtAgo(u.lastSeen)}', style: TextStyle(color: cs.onSurfaceVariant, fontSize: 12)),
+              ]),
+            ),
+            const SizedBox(width: 8),
+            StatusPill(user: u),
+          ]),
         ),
-      ],
+      ),
     );
   }
 }

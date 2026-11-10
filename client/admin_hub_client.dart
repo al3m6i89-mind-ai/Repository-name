@@ -4,7 +4,11 @@
 //
 //   final hub = AdminHubClient(apiKey: 'AIza…', projectId: 'my-apps-12345', appId: 'my-app');
 //   final s = await hub.check(name: name, email: email);
+//   if (s.mustSignOut) { /* sign the user out */ }
 //   if (!s.allowed) { /* show s.message and block the app */ }
+//   if (s.adminMessage.isNotEmpty) { /* show it once */ }
+//   if (s.isRestricted('chat')) { /* hide the chat feature */ }
+//   hub.logEvent('نشر منشوراً', detail: caption, icon: '📝');   // shows in the hub's activity tab
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
@@ -16,7 +20,23 @@ class HubStatus {
   final HubState state;
   final DateTime? until;
   final String reason;
-  const HubStatus(this.state, {this.until, this.reason = ''});
+  final String role, plan, adminMessage;
+  final int points, warnings;
+  final bool verified, mustSignOut;
+  final List<String> restrictions;
+  const HubStatus(this.state,
+      {this.until,
+      this.reason = '',
+      this.role = 'user',
+      this.plan = 'free',
+      this.adminMessage = '',
+      this.points = 0,
+      this.warnings = 0,
+      this.verified = false,
+      this.mustSignOut = false,
+      this.restrictions = const []});
+
+  bool isRestricted(String feature) => restrictions.contains(feature);
 
   /// Offline counts as allowed so a bad connection never locks people out.
   bool get allowed => state == HubState.active || state == HubState.offline;
@@ -77,14 +97,62 @@ class AdminHubClient {
           'lastSeen': {'timestampValue': DateTime.now().toUtc().toIso8601String()},
         }}),
       );
-      final reason = '${(f['banReason'] as Map?)?['stringValue'] ?? ''}';
-      if ((f['banned'] as Map?)?['booleanValue'] == true) return HubStatus(HubState.banned, reason: reason);
-      final until = DateTime.tryParse('${(f['suspendedUntil'] as Map?)?['timestampValue'] ?? ''}');
-      if (until != null && until.isAfter(DateTime.now())) return HubStatus(HubState.suspended, until: until, reason: reason);
-      return const HubStatus(HubState.active);
+      String str(String k) => '${(f[k] as Map?)?['stringValue'] ?? ''}';
+      int num(String k) => int.tryParse('${(f[k] as Map?)?['integerValue'] ?? 0}') ?? 0;
+      DateTime? time(String k) => DateTime.tryParse('${(f[k] as Map?)?['timestampValue'] ?? ''}');
+      final reason = str('banReason');
+      final logoutAt = time('forceLogoutAt');
+      final seenLogout = DateTime.tryParse(p.getString('hub_logout_$appId') ?? '');
+      final mustSignOut = logoutAt != null && (seenLogout == null || logoutAt.isAfter(seenLogout));
+      if (mustSignOut) await p.setString('hub_logout_$appId', logoutAt.toIso8601String());
+      final msgAt = time('adminMessageAt');
+      final seenMsg = DateTime.tryParse(p.getString('hub_msg_$appId') ?? '');
+      final newMsg = msgAt != null && (seenMsg == null || msgAt.isAfter(seenMsg));
+      if (newMsg) await p.setString('hub_msg_$appId', msgAt.toIso8601String());
+      final until = time('suspendedUntil');
+      final banned = (f['banned'] as Map?)?['booleanValue'] == true;
+      return HubStatus(
+        banned
+            ? HubState.banned
+            : (until != null && until.isAfter(DateTime.now()) ? HubState.suspended : HubState.active),
+        until: until,
+        reason: reason,
+        role: str('role').isEmpty ? 'user' : str('role'),
+        plan: str('plan').isEmpty ? 'free' : str('plan'),
+        adminMessage: newMsg ? str('adminMessage') : '',
+        points: num('points'),
+        warnings: num('warnings'),
+        verified: (f['verified'] as Map?)?['booleanValue'] == true,
+        mustSignOut: mustSignOut,
+        restrictions: [
+          for (final v in (((f['restrictions'] as Map?)?['arrayValue'] as Map?)?['values'] as List?) ?? const [])
+            '${(v as Map)['stringValue']}',
+        ],
+      );
     } catch (_) {
       return const HubStatus(HubState.offline);
     }
+  }
+
+  /// Records something the user did; it shows on their activity timeline
+  /// in the hub. Fire and forget.
+  Future<void> logEvent(String type, {String detail = '', String icon = '•'}) async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      final auth = await _auth(p);
+      if (auth == null) return;
+      final (token, uid) = auth;
+      await http.post(
+        Uri.parse('$_doc/$uid/events'),
+        headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+        body: jsonEncode({'fields': {
+          'type': {'stringValue': type},
+          'detail': {'stringValue': detail},
+          'icon': {'stringValue': icon},
+          'at': {'timestampValue': DateTime.now().toUtc().toIso8601String()},
+        }}),
+      );
+    } catch (_) {}
   }
 
   /// Anonymous Firebase account per install, kept in SharedPreferences.

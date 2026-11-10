@@ -3,7 +3,11 @@ service cloud.firestore {
   match /databases/{db}/documents {
     function signedIn() { return request.auth != null; }
     function isAdmin() { return signedIn() && exists(/databases/$(db)/documents/admins/$(request.auth.uid)); }
-    function touchesModeration(keys) { return keys.hasAny(['banned', 'suspendedUntil', 'banReason']); }
+    // The only fields an app user may write on their own record. Everything
+    // else (ban, suspension, role, plan, points, messages…) is admin-only.
+    function selfFields() {
+      return ['name', 'email', 'phone', 'createdAt', 'lastSeen', 'device', 'appVersion', 'photoUrl'];
+    }
 
     // Admin accounts are added by hand in the Firebase console.
     match /admins/{uid} {
@@ -11,18 +15,30 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Admin-only: action log and private notes.
+    match /logs/{id} { allow read, write: if isAdmin(); }
+    match /notes/{id} { allow read, write: if isAdmin(); }
+
     match /apps/{appId} {
       allow read, write: if isAdmin();
 
       match /users/{userId} {
         allow read, write: if isAdmin();
-        // Each app user can see their own record and keep their name/email/lastSeen
-        // up to date, but can never lift their own ban or suspension.
         allow read: if signedIn() && request.auth.uid == userId;
         allow create: if signedIn() && request.auth.uid == userId
-                      && !touchesModeration(request.resource.data.keys());
+                      && request.resource.data.keys().hasOnly(selfFields());
         allow update: if signedIn() && request.auth.uid == userId
-                      && !touchesModeration(request.resource.data.diff(resource.data).affectedKeys());
+                      && request.resource.data.diff(resource.data).affectedKeys().hasOnly(selfFields());
+
+        // What the user does in the app (shown on their activity timeline),
+        // and their own posts, stories… (shown under Content).
+        match /{sub}/{docId} {
+          allow read, write: if isAdmin();
+          allow create: if signedIn() && request.auth.uid == userId
+                        && sub in ['events', 'posts', 'stories', 'moments', 'comments', 'photos', 'videos'];
+          allow read, update, delete: if signedIn() && request.auth.uid == userId
+                        && sub in ['posts', 'stories', 'moments', 'comments', 'photos', 'videos'];
+        }
       }
     }
   }
