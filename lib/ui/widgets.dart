@@ -12,10 +12,16 @@ const avatarColors = [
 class UserAvatar extends StatelessWidget {
   final AppUser user;
   final double size;
-  const UserAvatar({super.key, required this.user, this.size = 44});
+  final Object? heroTag;
+  const UserAvatar({super.key, required this.user, this.size = 44, this.heroTag});
 
   @override
   Widget build(BuildContext context) {
+    final a = _avatar(context);
+    return heroTag == null ? a : Hero(tag: heroTag!, child: a);
+  }
+
+  Widget _avatar(BuildContext context) {
     final c = avatarColors[user.id.hashCode.abs() % avatarColors.length];
     final letter = user.displayName.characters.first;
     return Stack(clipBehavior: Clip.none, children: [
@@ -118,7 +124,9 @@ class StatCard extends StatelessWidget {
               child: Icon(icon, color: color, size: 20),
             ),
             const SizedBox(height: 12),
-            Text(value, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800, height: 1)),
+            int.tryParse(value) != null
+                ? CountUp(int.parse(value), style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800, height: 1))
+                : Text(value, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800, height: 1)),
             const SizedBox(height: 4),
             Text(label, style: TextStyle(color: cs.onSurfaceVariant, fontSize: 13), maxLines: 1, overflow: TextOverflow.ellipsis),
           ]),
@@ -275,4 +283,102 @@ void toast(BuildContext context, String text, {bool error = false}) {
       content: Text(text),
       backgroundColor: error ? Brand.danger : null,
     ));
+}
+
+/// Soft pulsing placeholder shown while data loads.
+class Skeleton extends StatefulWidget {
+  final double height;
+  final double? width;
+  final double radius;
+  const Skeleton({super.key, this.height = 16, this.width, this.radius = 10});
+
+  @override
+  State<Skeleton> createState() => _SkeletonState();
+}
+
+class _SkeletonState extends State<Skeleton> with SingleTickerProviderStateMixin {
+  late final _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 1100))..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final base = Theme.of(context).colorScheme.onSurface;
+    return FadeTransition(
+      opacity: Tween(begin: .05, end: .12).animate(CurvedAnimation(parent: _c, curve: Curves.easeInOut)),
+      child: Container(
+        height: widget.height,
+        width: widget.width,
+        decoration: BoxDecoration(color: base, borderRadius: BorderRadius.circular(widget.radius)),
+      ),
+    );
+  }
+}
+
+/// A list of placeholder cards.
+class SkeletonList extends StatelessWidget {
+  final int count;
+  const SkeletonList({super.key, this.count = 6});
+
+  @override
+  Widget build(BuildContext context) => Column(children: [
+        for (var i = 0; i < count; i++)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Card(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Row(children: [
+                  const Skeleton(height: 46, width: 46, radius: 15),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Skeleton(height: 14, width: 120 + (i % 3) * 30.0),
+                      const SizedBox(height: 8),
+                      const Skeleton(height: 11, width: 170),
+                    ]),
+                  ),
+                ]),
+              ),
+            ),
+          ),
+      ]);
+}
+
+/// Fades and slides a child in, a little later for each [index].
+class Appear extends StatelessWidget {
+  final int index;
+  final Widget child;
+  const Appear({super.key, this.index = 0, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    final delay = (index.clamp(0, 8)) * 40;
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: Duration(milliseconds: 260 + delay),
+      curve: Interval(delay / (260 + delay), 1, curve: Curves.easeOutCubic),
+      builder: (_, t, c) => Opacity(opacity: t, child: Transform.translate(offset: Offset(0, 12 * (1 - t)), child: c)),
+      child: child,
+    );
+  }
+}
+
+/// A number that counts up to its new value.
+class CountUp extends StatelessWidget {
+  final int value;
+  final TextStyle? style;
+  const CountUp(this.value, {super.key, this.style});
+
+  @override
+  Widget build(BuildContext context) => TweenAnimationBuilder<double>(
+        tween: Tween(end: value.toDouble()),
+        duration: const Duration(milliseconds: 650),
+        curve: Curves.easeOutCubic,
+        builder: (_, v, __) => Text('${v.round()}', style: style),
+      );
 }

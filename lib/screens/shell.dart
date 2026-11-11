@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'activity_screen.dart';
 import 'apps_screen.dart';
+import 'assistant_screen.dart';
 import 'dashboard_screen.dart';
 import 'settings_screen.dart';
 
@@ -15,26 +16,35 @@ class Shell extends StatefulWidget {
 
 class _ShellState extends State<Shell> {
   int _i = 0;
+  final Set<int> _visited = {0};
 
   static const _dest = [
     (Icons.space_dashboard_outlined, Icons.space_dashboard_rounded, 'الرئيسية'),
     (Icons.apps_outlined, Icons.apps_rounded, 'التطبيقات'),
+    (Icons.auto_awesome_outlined, Icons.auto_awesome_rounded, 'المساعد'),
     (Icons.history_outlined, Icons.history_rounded, 'السجل'),
     (Icons.settings_outlined, Icons.settings_rounded, 'الإعدادات'),
   ];
 
-  void go(int i) => setState(() => _i = i);
+  void go(int i) => setState(() {
+        _i = i;
+        _visited.add(i);
+      });
 
   @override
   Widget build(BuildContext context) {
     final pages = [
-      DashboardScreen(onOpenApps: () => go(1), onOpenLog: () => go(2)),
+      DashboardScreen(onOpenApps: () => go(1), onOpenLog: () => go(3), onOpenAssistant: () => go(2)),
       const AppsScreen(),
+      const AssistantScreen(),
       const ActivityScreen(),
       const SettingsScreen(),
     ];
     final wide = MediaQuery.of(context).size.width >= 900;
-    final body = IndexedStack(index: _i, children: pages);
+    // Pages are built the first time they are opened, then kept alive.
+    final body = IndexedStack(index: _i, children: [
+      for (var i = 0; i < pages.length; i++) _visited.contains(i) ? pages[i] : const SizedBox.shrink(),
+    ]);
     if (wide) {
       return Scaffold(
         body: Row(children: [

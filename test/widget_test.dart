@@ -1,6 +1,6 @@
 import 'package:admin_hub/backend/session.dart';
 import 'package:admin_hub/main.dart';
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -24,6 +24,13 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('لوحة التحكم'), findsOneWidget);
       expect(find.text('نشط اليوم'), findsOneWidget);
+
+      await tester.tap(find.text('المساعد').last);
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).last, 'كم واحد محظور؟');
+      await tester.testTextInput.receiveAction(TextInputAction.send);
+      await tester.pump();
+      expect(find.textContaining('محظور.'), findsOneWidget);
 
       await tester.tap(find.text('التطبيقات').last);
       await tester.pumpAndSettle();

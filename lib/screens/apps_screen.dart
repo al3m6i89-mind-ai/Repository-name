@@ -16,15 +16,7 @@ class AppsScreen extends StatefulWidget {
 }
 
 class _AppsScreenState extends State<AppsScreen> {
-  Future<List<AppInfo>>? _apps;
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _apps ??= Hub.of(context).session.allApps();
-  }
-
-  void _reload() => setState(() => _apps = Hub.of(context).session.allApps());
+  Future<void> _reload() => Hub.of(context).session.refreshAll();
 
   Future<void> _addAccount() async {
     final ok = await Navigator.of(context).push<bool>(MaterialPageRoute(builder: (_) => const AddConnectionScreen()));
@@ -60,7 +52,8 @@ class _AppsScreenState extends State<AppsScreen> {
 
   Future<void> _removeAccount(Linked l) async {
     final ok = await confirm(context, 'فصل ${l.connection.label}؟',
-        'يُحذف الحساب من هذا الجهاز فقط مع ملاحظاته وسجله المحلي. ما يتأثر شي في Firebase.', action: 'فصل');
+        'يُحذف الحساب من هذا الجهاز فقط مع ملاحظاته وسجله المحلي. ما يتأثر شي في Firebase.',
+        action: 'فصل');
     if (!ok || !mounted) return;
     await Hub.of(context).session.remove(l);
     _reload();
@@ -75,28 +68,29 @@ class _AppsScreenState extends State<AppsScreen> {
         actions: [IconButton(onPressed: _reload, icon: const Icon(Icons.refresh_rounded), tooltip: 'تحديث')],
       ),
       floatingActionButton: FloatingActionButton.extended(
+        heroTag: 'add-account',
         onPressed: _addAccount,
         icon: const Icon(Icons.add_link_rounded),
         label: const Text('ربط حساب'),
       ),
-      body: FutureBuilder<List<AppInfo>>(
-        future: _apps,
-        builder: (context, snap) {
-          if (snap.connectionState != ConnectionState.done) return const Center(child: CircularProgressIndicator());
-          if (snap.hasError) return ErrorView(message: '${snap.error}', onRetry: _reload);
-          final apps = snap.data!;
+      body: ListenableBuilder(
+        listenable: session,
+        builder: (context, _) {
+          final apps = [for (final d in session.apps) d.app];
           if (session.linked.isEmpty) {
             return EmptyView(
               icon: Icons.link_off_rounded,
               title: 'ما فيه حسابات مربوطة',
               text: 'اربط أول حساب Firebase عشان تظهر تطبيقاتك.',
-              action: FilledButton.icon(onPressed: _addAccount, icon: const Icon(Icons.add_link_rounded), label: const Text('ربط حساب')),
+              action: FilledButton.icon(
+                  onPressed: _addAccount, icon: const Icon(Icons.add_link_rounded), label: const Text('ربط حساب')),
             );
           }
           return RefreshIndicator(
-            onRefresh: () async => _reload(),
+            onRefresh: _reload,
             child: ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 100), children: [
-              for (final l in session.linked) ..._group(l, apps.where((a) => a.connectionId == l.connection.id).toList()),
+              for (final l in session.linked)
+                ..._group(l, apps.where((a) => a.connectionId == l.connection.id).toList()),
             ]),
           );
         },
@@ -129,14 +123,17 @@ class _AppsScreenState extends State<AppsScreen> {
             },
             itemBuilder: (_) => [
               const PopupMenuItem(value: 'rename', child: Text('تغيير الاسم والأيقونة')),
-              if (c.type != ConnectionType.serviceAccount) const PopupMenuItem(value: 'add', child: Text('إضافة تطبيق')),
+              if (c.type != ConnectionType.serviceAccount)
+                const PopupMenuItem(value: 'add', child: Text('إضافة تطبيق')),
               const PopupMenuItem(value: 'retry', child: Text('إعادة الاتصال')),
               const PopupMenuItem(value: 'remove', child: Text('فصل الحساب', style: TextStyle(color: Brand.danger))),
             ],
           ),
         ]),
       ),
-      if (!l.ok)
+      if (l.connecting && apps.isEmpty)
+        const SkeletonList(count: 1)
+      else if (!l.ok)
         Card(
           color: Brand.danger.withValues(alpha: .08),
           child: ListTile(
@@ -160,25 +157,29 @@ class _AppsScreenState extends State<AppsScreen> {
         )
       else
         for (final app in apps) ...[
-          Card(
-            clipBehavior: Clip.antiAlias,
-            child: ListTile(
-              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-              leading: AppBadge(app: app),
-              title: Text(app.name, style: const TextStyle(fontWeight: FontWeight.w800)),
-              subtitle: Text(app.description.isEmpty ? app.id : app.description),
-              trailing: c.type == ConnectionType.serviceAccount
-                  ? const Icon(Icons.chevron_left_rounded)
-                  : PopupMenuButton<String>(
-                      onSelected: (v) => v == 'edit' ? _editApp(l, app) : _removeApp(l, app),
-                      itemBuilder: (_) => const [
-                        PopupMenuItem(value: 'edit', child: Text('تعديل')),
-                        PopupMenuItem(value: 'delete', child: Text('إزالة من اللوحة')),
-                      ],
-                    ),
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => UsersScreen(app: app))),
-            ),
-          ),
+          Builder(builder: (context) {
+            final n = Hub.of(context).session.dataOf(app)?.users.length;
+            return Card(
+              clipBehavior: Clip.antiAlias,
+              child: ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                leading: AppBadge(app: app),
+                title: Text(app.name, style: const TextStyle(fontWeight: FontWeight.w800)),
+                subtitle:
+                    Text([if (n != null) '$n مستخدم', app.description.isEmpty ? app.id : app.description].join(' · ')),
+                trailing: c.type == ConnectionType.serviceAccount
+                    ? const Icon(Icons.chevron_left_rounded)
+                    : PopupMenuButton<String>(
+                        onSelected: (v) => v == 'edit' ? _editApp(l, app) : _removeApp(l, app),
+                        itemBuilder: (_) => const [
+                          PopupMenuItem(value: 'edit', child: Text('تعديل')),
+                          PopupMenuItem(value: 'delete', child: Text('إزالة من اللوحة')),
+                        ],
+                      ),
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => UsersScreen(app: app))),
+              ),
+            );
+          }),
           const SizedBox(height: 8),
         ],
     ];
@@ -228,7 +229,8 @@ class _AppDialogState extends State<_AppDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(widget.app == null ? 'إضافة تطبيق' : 'تعديل التطبيق', style: const TextStyle(fontWeight: FontWeight.w800)),
+      title: Text(widget.app == null ? 'إضافة تطبيق' : 'تعديل التطبيق',
+          style: const TextStyle(fontWeight: FontWeight.w800)),
       content: SingleChildScrollView(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           TextField(controller: _name, decoration: const InputDecoration(labelText: 'الاسم')),

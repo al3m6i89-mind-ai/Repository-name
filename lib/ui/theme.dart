@@ -27,6 +27,10 @@ ThemeData buildTheme(Brightness b) {
   final base = ThemeData(useMaterial3: true, colorScheme: cs, fontFamily: 'Tajawal', brightness: b);
   return base.copyWith(
     scaffoldBackgroundColor: cs.surface,
+    pageTransitionsTheme: const PageTransitionsTheme(builders: {
+      TargetPlatform.android: FadeForwardsPageTransitionsBuilder(),
+    }),
+    splashFactory: InkSparkle.splashFactory,
     cardTheme: CardThemeData(
       color: card,
       elevation: 0,

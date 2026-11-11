@@ -36,11 +36,12 @@ jobs:
         run: |
           keytool -genkeypair -keystore android/app/ci-signing.jks -storepass adminhub-ci -keypass adminhub-ci \
             -alias adminhub -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Admin Hub, O=Admin Hub"
-      - run: flutter build apk --release --build-number=${{ github.run_number }}
+      # One APK per processor type: much smaller than a universal APK.
+      - run: flutter build apk --release --split-per-abi --obfuscate --split-debug-info=build/symbols --build-number=${{ github.run_number }}
       - uses: actions/upload-artifact@v4
         with:
           name: admin-hub-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: build/app/outputs/flutter-apk/app-*-release.apk
           retention-days: 30
       # A release gives a direct download link that opens on the phone:
       # https://github.com/<owner>/<repo>/releases/latest/download/admin-hub.apk
@@ -48,6 +49,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cp build/app/outputs/flutter-apk/app-release.apk admin-hub.apk
-          gh release create "build-${{ github.run_number }}" admin-hub.apk \
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk admin-hub.apk
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk admin-hub-old-phones.apk
+          ls -la admin-hub*.apk
+          gh release create "build-${{ github.run_number }}" admin-hub.apk admin-hub-old-phones.apk \
             --title "لوحة تطبيقاتي ${{ github.run_number }}" --notes "${{ github.event.head_commit.message || 'Manual build' }}" --latest

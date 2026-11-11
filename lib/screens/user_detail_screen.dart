@@ -39,26 +39,39 @@ class _UserDetailScreenState extends State<UserDetailScreen> {
 
   Future<void> _loadAll() async {
     final b = _backend;
-    try {
-      final fresh = await b.getUser(_appId, _u.id);
-      if (fresh != null && mounted) setState(() => _u = fresh);
-    } catch (_) {}
-    try {
-      final info = await b.getInsights(_appId, _u);
-      if (mounted) setState(() => _info = info);
-    } catch (e) {
-      if (mounted) setState(() => _infoError = e);
-    }
-    try {
-      final note = await b.getNote(_appId, _u.id);
-      final logs = (await b.listLogs(limit: 300)).where((l) => l.userId == _u.id && l.appId == _appId).toList();
-      if (mounted) {
-        setState(() {
-          _note = note;
-          _logs = logs;
-        });
-      }
-    } catch (_) {}
+    final session = Hub.of(context).session;
+    // Everything loads at the same time; each part shows as soon as it lands.
+    await Future.wait([
+      () async {
+        try {
+          final fresh = await b.getUser(_appId, _u.id);
+          if (fresh != null && mounted) {
+            setState(() => _u = fresh);
+            session.putUser(widget.app, fresh);
+          }
+        } catch (_) {}
+      }(),
+      () async {
+        try {
+          final info = await b.getInsights(_appId, _u);
+          if (mounted) setState(() => _info = info);
+        } catch (e) {
+          if (mounted) setState(() => _infoError = e);
+        }
+      }(),
+      () async {
+        try {
+          final note = await b.getNote(_appId, _u.id);
+          if (mounted) setState(() => _note = note);
+        } catch (_) {}
+      }(),
+      () async {
+        try {
+          final logs = (await b.listLogs(limit: 300)).where((l) => l.userId == _u.id && l.appId == _appId).toList();
+          if (mounted) setState(() => _logs = logs);
+        } catch (_) {}
+      }(),
+    ]);
   }
 
   /// Like [_run] but shows whether the phone notification was delivered.
@@ -73,10 +86,16 @@ class _UserDetailScreenState extends State<UserDetailScreen> {
     try {
       await f();
       if (!mounted) return;
+      final session = Hub.of(context).session;
       if (done.isNotEmpty) toast(context, done);
-      if (pop) return Navigator.of(context).pop();
-      final fresh = await _backend.getUser(_appId, _u.id);
-      final logs = (await _backend.listLogs(limit: 300)).where((l) => l.userId == _u.id && l.appId == _appId).toList();
+      if (pop) {
+        session.dropUser(widget.app, _u.id);
+        return Navigator.of(context).pop();
+      }
+      final results = await Future.wait([_backend.getUser(_appId, _u.id), _backend.listLogs(limit: 300)]);
+      final fresh = results[0] as AppUser?;
+      final logs = (results[1] as List<LogEntry>).where((l) => l.userId == _u.id && l.appId == _appId).toList();
+      if (fresh != null) session.putUser(widget.app, fresh);
       if (mounted) {
         setState(() {
           if (fresh != null) _u = fresh;
@@ -135,7 +154,7 @@ class _UserDetailScreenState extends State<UserDetailScreen> {
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Container(
           decoration: BoxDecoration(borderRadius: BorderRadius.circular(26), border: Border.all(color: Colors.white54, width: 2)),
-          child: UserAvatar(user: u, size: 76),
+          child: UserAvatar(user: u, size: 76, heroTag: 'av-${widget.app.key}-${u.id}'),
         ),
         const SizedBox(width: 16),
         Expanded(

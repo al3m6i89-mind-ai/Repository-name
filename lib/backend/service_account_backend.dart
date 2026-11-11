@@ -136,9 +136,9 @@ class ServiceAccountBackend implements AdminBackend {
     String? page;
     do {
       final body = await _call('GET', '$_auth/accounts:batchGet?maxResults=1000${page == null ? '' : '&nextPageToken=$page'}');
-      for (final u in (body['users'] as List?) ?? const []) {
-        out.add(await _liftExpired(_toUser(u as Map<String, dynamic>)));
-      }
+      out.addAll(await Future.wait([
+        for (final u in (body['users'] as List?) ?? const []) _liftExpired(_toUser(u as Map<String, dynamic>)),
+      ]));
       page = body['nextPageToken'];
       if (page != null && page.isEmpty) page = null;
     } while (page != null);
@@ -289,6 +289,8 @@ class ServiceAccountBackend implements AdminBackend {
 
   @override
   Future<UserInsights> getInsights(String appId, AppUser u) async {
+    final dataF = _findUserData(u);
+    dataF.ignore();
     final raw = await _raw(u.id) ?? {};
     final notes = <String>[];
     final account = <String, String>{
@@ -323,7 +325,7 @@ class ServiceAccountBackend implements AdminBackend {
 
     final data = <DataDoc>[];
     try {
-      data.addAll(await _findUserData(u));
+      data.addAll(await dataF);
       for (final d in data) {
         for (final k in const ['createdAt', 'updatedAt', 'timestamp', 'date', 'time', 'at']) {
           final v = d.fields[k];
@@ -353,24 +355,36 @@ class ServiceAccountBackend implements AdminBackend {
   /// their UID in any top-level collection (and its sub-collections), and
   /// documents whose owner field holds their UID.
   Future<List<DataDoc>> _findUserData(AppUser u) async {
-    final found = <String, DataDoc>{};
     final cols = await _collectionIds(_docs);
-    for (final col in cols.take(25)) {
-      final direct = await _getDoc('$_docs/$col/${u.id}');
-      if (direct != null) {
-        found[direct.path] = direct;
-        for (final sub in (await _collectionIds('$_docs/$col/${u.id}')).take(10)) {
-          for (final d in await _listDocs('$_docs/$col/${u.id}/$sub', 50)) {
-            found[d.path] = d;
+    // Every collection is searched at the same time.
+    final perCol = await Future.wait(cols.take(30).map((col) async {
+      final out = <DataDoc>[];
+      try {
+        final results = await Future.wait([
+          _getDoc('$_docs/$col/${u.id}'),
+          _ownedBy(col, u),
+        ]);
+        final direct = results[0] as DataDoc?;
+        if (direct != null) {
+          out.add(direct);
+          final subs = (await _collectionIds('$_docs/$col/${u.id}')).take(10);
+          for (final docs in await Future.wait(subs.map((sub) => _listDocs('$_docs/$col/${u.id}/$sub', 50)))) {
+            out.addAll(docs);
           }
         }
+        out.addAll(results[1] as List<DataDoc>);
+      } on _Soft catch (e) {
+        if (e.code != 404) rethrow;
       }
-      for (final d in await _ownedBy(col, u)) {
+      return out;
+    }));
+    final found = <String, DataDoc>{};
+    for (final list in perCol) {
+      for (final d in list) {
         found.putIfAbsent(d.path, () => d);
       }
-      if (found.length > 150) break;
     }
-    return found.values.toList();
+    return found.values.take(300).toList();
   }
 
   Future<List<String>> _collectionIds(String parent) async {

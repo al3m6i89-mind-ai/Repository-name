@@ -19,8 +19,17 @@ class UsersScreen extends StatefulWidget {
 }
 
 class _UsersScreenState extends State<UsersScreen> {
-  List<AppUser>? _users;
-  Object? _error;
+  List<AppUser>? get _users {
+    final d = Hub.of(context).session.dataOf(widget.app);
+    return d == null || (d.users.isEmpty && d.updated == null) ? null : d.users;
+  }
+
+  Object? get _error {
+    final d = Hub.of(context).session.dataOf(widget.app);
+    return d?.users.isEmpty == true ? d?.error : null;
+  }
+
+  bool _started = false;
   String _query = '';
   UserStatus? _filter;
   _Sort _sort = _Sort.lastSeen;
@@ -30,18 +39,14 @@ class _UsersScreenState extends State<UsersScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_users == null && _error == null) _load();
-  }
-
-  Future<void> _load() async {
-    setState(() => _error = null);
-    try {
-      final users = await Hub.of(context).session.backendOf(widget.app).listUsers(widget.app.id);
-      if (mounted) setState(() => _users = users);
-    } catch (e) {
-      if (mounted) setState(() => _error = e);
+    if (!_started) {
+      _started = true;
+      // Show what is cached now, refresh quietly.
+      Future.microtask(_load);
     }
   }
+
+  Future<void> _load() => Hub.of(context).session.refreshApp(widget.app);
 
   List<AppUser> _shown() {
     final q = _query.trim().toLowerCase();
@@ -82,10 +87,12 @@ class _UsersScreenState extends State<UsersScreen> {
           if (r != null) run = (u) => acts.suspend(appId, u, DateTime.now().add(d), r);
         }
       case 'message':
-        final m = await askText(context, 'رسالة لـ ${targets.length} مستخدم', label: 'نص الرسالة', required: true, maxLines: 4);
+        final m = await askText(context, 'رسالة لـ ${targets.length} مستخدم',
+            label: 'نص الرسالة', required: true, maxLines: 4);
         if (m != null) run = (u) => acts.message(appId, u, m).then((_) {});
       case 'logout':
-        if (await confirm(context, 'تسجيل خروج ${targets.length} مستخدم؟', 'يخرجون من كل الأجهزة ويلزمهم دخول من جديد.', danger: false)) {
+        if (await confirm(context, 'تسجيل خروج ${targets.length} مستخدم؟', 'يخرجون من كل الأجهزة ويلزمهم دخول من جديد.',
+            danger: false)) {
           run = (u) => acts.forceLogout(appId, u);
         }
       case 'unban':
@@ -94,7 +101,8 @@ class _UsersScreenState extends State<UsersScreen> {
           if (u.status == UserStatus.suspended) await acts.unsuspend(appId, u);
         };
       case 'delete':
-        if (await confirm(context, 'حذف ${targets.length} حساب نهائياً؟', 'ما تقدر ترجعهم بعد الحذف.', action: 'حذف نهائي')) {
+        if (await confirm(context, 'حذف ${targets.length} حساب نهائياً؟', 'ما تقدر ترجعهم بعد الحذف.',
+            action: 'حذف نهائي')) {
           run = (u) => acts.delete(appId, u);
         }
     }
@@ -113,9 +121,10 @@ class _UsersScreenState extends State<UsersScreen> {
       _busy = false;
       _selected.clear();
     });
-    toast(context, failed == 0 ? 'تم تنفيذ الإجراء على ${targets.length}' : 'نجح ${targets.length - failed} وفشل $failed',
-        error: failed > 0);
     _load();
+    toast(
+        context, failed == 0 ? 'تم تنفيذ الإجراء على ${targets.length}' : 'نجح ${targets.length - failed} وفشل $failed',
+        error: failed > 0);
   }
 
   @override
@@ -158,24 +167,29 @@ class _UsersScreenState extends State<UsersScreen> {
                   tooltip: 'ترتيب',
                   onSelected: (s) => setState(() => _sort = s),
                   itemBuilder: (_) => [
-                    CheckedPopupMenuItem(value: _Sort.lastSeen, checked: _sort == _Sort.lastSeen, child: const Text('آخر ظهور')),
-                    CheckedPopupMenuItem(value: _Sort.newest, checked: _sort == _Sort.newest, child: const Text('الأحدث تسجيلاً')),
+                    CheckedPopupMenuItem(
+                        value: _Sort.lastSeen, checked: _sort == _Sort.lastSeen, child: const Text('آخر ظهور')),
+                    CheckedPopupMenuItem(
+                        value: _Sort.newest, checked: _sort == _Sort.newest, child: const Text('الأحدث تسجيلاً')),
                     CheckedPopupMenuItem(value: _Sort.name, checked: _sort == _Sort.name, child: const Text('الاسم')),
                   ],
                 ),
                 IconButton(onPressed: _load, icon: const Icon(Icons.refresh_rounded), tooltip: 'تحديث'),
               ],
             ),
-      body: Column(children: [
-        if (_busy) const LinearProgressIndicator(),
-        Expanded(
-          child: _error != null
-              ? ErrorView(message: '$_error', onRetry: _load)
-              : _users == null
-                  ? const Center(child: CircularProgressIndicator())
-                  : _list(),
-        ),
-      ]),
+      body: ListenableBuilder(
+        listenable: Hub.of(context).session,
+        builder: (context, _) => Column(children: [
+          if (_busy) const LinearProgressIndicator(),
+          Expanded(
+            child: _error != null
+                ? ErrorView(message: '$_error', onRetry: _load)
+                : _users == null
+                    ? const Padding(padding: EdgeInsets.all(16), child: SkeletonList())
+                    : _list(),
+          ),
+        ]),
+      ),
     );
   }
 
@@ -183,41 +197,52 @@ class _UsersScreenState extends State<UsersScreen> {
     final users = _users!;
     final shown = _shown();
     int count(UserStatus s) => users.where((u) => u.status == s).length;
+    final header = <Widget>[
+      TextField(
+        decoration: const InputDecoration(
+            prefixIcon: Icon(Icons.search_rounded), hintText: 'ابحث بالاسم أو الإيميل أو الجوال أو المعرّف'),
+        onChanged: (v) => setState(() => _query = v),
+      ),
+      const SizedBox(height: 12),
+      SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(children: [
+          ChoiceChip(
+              label: Text('الكل ${users.length}'),
+              selected: _filter == null,
+              onSelected: (_) => setState(() => _filter = null)),
+          for (final s in UserStatus.values) ...[
+            const SizedBox(width: 8),
+            ChoiceChip(
+              label: Text('${statusName(s)} ${count(s)}'),
+              selected: _filter == s,
+              onSelected: (_) => setState(() => _filter = _filter == s ? null : s),
+            ),
+          ],
+        ]),
+      ),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+        child: Text('${shown.length} نتيجة · اضغط مطولاً لتحديد أكثر من واحد',
+            style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12)),
+      ),
+      if (shown.isEmpty)
+        const Padding(
+            padding: EdgeInsets.only(top: 50),
+            child: EmptyView(icon: Icons.people_outline_rounded, title: 'ما فيه مستخدمين هنا')),
+    ];
     return RefreshIndicator(
       onRefresh: _load,
-      child: ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 24), children: [
-        TextField(
-          decoration: const InputDecoration(prefixIcon: Icon(Icons.search_rounded), hintText: 'ابحث بالاسم أو الإيميل أو الجوال أو المعرّف'),
-          onChanged: (v) => setState(() => _query = v),
-        ),
-        const SizedBox(height: 12),
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(children: [
-            ChoiceChip(label: Text('الكل ${users.length}'), selected: _filter == null, onSelected: (_) => setState(() => _filter = null)),
-            for (final s in UserStatus.values) ...[
-              const SizedBox(width: 8),
-              ChoiceChip(
-                label: Text('${statusName(s)} ${count(s)}'),
-                selected: _filter == s,
-                onSelected: (_) => setState(() => _filter = _filter == s ? null : s),
+      child: ListView.builder(
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+        itemCount: header.length + shown.length,
+        itemBuilder: (_, i) => i < header.length
+            ? header[i]
+            : Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Appear(index: i - header.length, child: _tile(shown[i - header.length])),
               ),
-            ],
-          ]),
-        ),
-        const SizedBox(height: 6),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-          child: Text('اضغط مطولاً على أي مستخدم لتحديد أكثر من واحد',
-              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12)),
-        ),
-        if (shown.isEmpty)
-          const Padding(padding: EdgeInsets.only(top: 50), child: EmptyView(icon: Icons.people_outline_rounded, title: 'ما فيه مستخدمين هنا')),
-        for (final u in shown) ...[
-          _tile(u),
-          const SizedBox(height: 8),
-        ],
-      ]),
+      ),
     );
   }
 
@@ -233,8 +258,7 @@ class _UsersScreenState extends State<UsersScreen> {
         onTap: _selected.isNotEmpty
             ? toggle
             : () => Navigator.of(context)
-                .push(MaterialPageRoute(builder: (_) => UserDetailScreen(app: widget.app, user: u)))
-                .then((_) => _load()),
+                .push(MaterialPageRoute(builder: (_) => UserDetailScreen(app: widget.app, user: u))),
         child: Padding(
           padding: const EdgeInsets.all(12),
           child: Row(children: [
@@ -245,16 +269,20 @@ class _UsersScreenState extends State<UsersScreen> {
                     decoration: BoxDecoration(color: cs.primary, borderRadius: BorderRadius.circular(15)),
                     child: const Icon(Icons.check_rounded, color: Colors.white),
                   )
-                : UserAvatar(user: u, size: 46),
+                : UserAvatar(user: u, size: 46, heroTag: 'av-${widget.app.key}-${u.id}'),
             const SizedBox(width: 12),
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Row(children: [
                   Flexible(
                     child: Text(u.displayName,
-                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15), overflow: TextOverflow.ellipsis),
+                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+                        overflow: TextOverflow.ellipsis),
                   ),
-                  if (u.verified) const Padding(padding: EdgeInsetsDirectional.only(start: 4), child: Icon(Icons.verified_rounded, size: 16, color: Brand.info)),
+                  if (u.verified)
+                    const Padding(
+                        padding: EdgeInsetsDirectional.only(start: 4),
+                        child: Icon(Icons.verified_rounded, size: 16, color: Brand.info)),
                 ]),
                 const SizedBox(height: 2),
                 Text(u.email.isNotEmpty ? u.email : (u.phone.isNotEmpty ? u.phone : u.id),
